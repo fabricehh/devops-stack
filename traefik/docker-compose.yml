@@ -1,0 +1,47 @@
+services:
+  traefik:
+    image: traefik:v3.0
+    container_name: traefik
+
+    command:
+      # Activation du dashboard
+      - --api.dashboard=true
+
+      # Intégration Docker
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+
+      # Points d'entrée réseau
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+
+      # Let's Encrypt — remplacez l'email par le vôtre
+      - --certificatesresolvers.letsencrypt.acme.email=youremail@example.com
+      - --certificatesresolvers.letsencrypt.acme.storage=/acme.json
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge=true
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
+
+    ports:
+      - "80:80"
+      - "443:443"
+
+    labels:
+      - traefik.enable=true
+      # Route vers le dashboard Traefik
+      - traefik.http.routers.dashboard.rule=Host(`traefik.devitlab.ddns.net`)
+      - traefik.http.routers.dashboard.service=api@internal
+      - traefik.http.routers.dashboard.entrypoints=websecure
+      - traefik.http.routers.dashboard.tls.certresolver=letsencrypt
+
+    networks:
+      - traefik-net
+
+    volumes:
+      # Accès au socket Docker (lecture seule)
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Persistance des certificats SSL
+      - ./acme.json:/acme.json
+
+networks:
+  traefik-net:
+    external: true
