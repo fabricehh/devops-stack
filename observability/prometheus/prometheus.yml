@@ -1,0 +1,37 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+# Règles d'alerte
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+# Envoi des alertes vers Alertmanager
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+# Cibles à scraper
+scrape_configs:
+
+  # Prometheus lui-même
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Métriques système (CPU, RAM, disque, réseau)
+  - job_name: node-exporter
+    static_configs:
+      - targets: ['node-exporter:9100']
+
+  # Métriques des conteneurs Docker
+  - job_name: cadvisor
+    static_configs:
+      - targets: ['cadvisor:8080']
+
+  # API Flask (expose /metrics via prometheus-flask-exporter)
+  - job_name: flask-api
+    static_configs:
+      - targets: ['flask-api:5000']

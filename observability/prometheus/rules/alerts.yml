@@ -1,0 +1,81 @@
+groups:
+  - name: systeme
+    rules:
+
+      # Alerte si un service est down
+      - alert: ServiceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Service {{ $labels.job }} est DOWN"
+          description: "Le service {{ $labels.job }} ne répond plus depuis 1 minute."
+
+      # Alerte CPU > 85%
+      - alert: HighCPU
+        expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 85
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CPU élevé sur {{ $labels.instance }}"
+          description: "CPU > 85% depuis 2 minutes."
+
+      # Alerte RAM > 90%
+      - alert: HighMemory
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 90
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "RAM élevée sur {{ $labels.instance }}"
+          description: "Mémoire > 90% depuis 2 minutes."
+
+      # Alerte disque > 80%
+      - alert: DiskSpaceLow
+        expr: (1 - (node_filesystem_avail_bytes{fstype!="tmpfs"} / node_filesystem_size_bytes)) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Espace disque faible sur {{ $labels.instance }}"
+          description: "Disque {{ $labels.mountpoint }} > 80%."
+
+  - name: flask-api
+    rules:
+
+      # API down
+      - alert: FlaskAPIDown
+        expr: up{job="flask-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "L'API Flask est DOWN"
+          description: "api.devitlab.ddns.net ne répond plus depuis 1 minute."
+
+      # Taux d'erreurs 5xx > 5%
+      - alert: FlaskHighErrorRate
+        expr: |
+          sum(rate(flask_http_request_total{status=~"5.."}[5m]))
+          / sum(rate(flask_http_request_total[5m])) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Taux d'erreurs 5xx élevé sur l'API Flask"
+          description: "Plus de 5% des requêtes échouent depuis 2 minutes."
+
+      # Latence p95 > 1 seconde
+      - alert: FlaskHighLatency
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(flask_http_request_duration_seconds_bucket[5m])) by (le)
+          ) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Latence élevée sur l'API Flask"
+          description: "Le p95 de latence dépasse 1 seconde."

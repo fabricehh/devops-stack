@@ -1,0 +1,213 @@
+services:
+
+  # ──────────────────────────────────────────
+  # PROMETHEUS — collecte des métriques
+  # ──────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.enable-lifecycle
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.prometheus.rule=Host(`prometheus.devitlab.ddns.net`)
+      - traefik.http.routers.prometheus.entrypoints=websecure
+      - traefik.http.routers.prometheus.tls.certresolver=letsencrypt
+      - traefik.http.services.prometheus.loadbalancer.server.port=9090
+    networks:
+      - traefik-net
+      - monitoring
+
+  # ──────────────────────────────────────────
+  # ALERTMANAGER — gestion des alertes
+  # ──────────────────────────────────────────
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: alertmanager
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.alertmanager.rule=Host(`alertmanager.devitlab.ddns.net`)
+      - traefik.http.routers.alertmanager.entrypoints=websecure
+      - traefik.http.routers.alertmanager.tls.certresolver=letsencrypt
+      - traefik.http.services.alertmanager.loadbalancer.server.port=9093
+    networks:
+      - traefik-net
+      - monitoring
+
+  # ──────────────────────────────────────────
+  # GRAFANA — dashboards & visualisation
+  # ──────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=changeme
+      - GF_SERVER_DOMAIN=grafana.devitlab.ddns.net
+      - GF_SERVER_ROOT_URL=https://grafana.devitlab.ddns.net
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.grafana.rule=Host(`grafana.devitlab.ddns.net`)
+      - traefik.http.routers.grafana.entrypoints=websecure
+      - traefik.http.routers.grafana.tls.certresolver=letsencrypt
+      - traefik.http.services.grafana.loadbalancer.server.port=3000
+    networks:
+      - traefik-net
+      - monitoring
+
+  # ──────────────────────────────────────────
+  # NODE EXPORTER — métriques système
+  # ──────────────────────────────────────────
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    restart: unless-stopped
+    pid: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/rootfs
+    networks:
+      - monitoring
+
+  # ──────────────────────────────────────────
+  # CADVISOR — métriques des conteneurs Docker
+  # ──────────────────────────────────────────
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: cadvisor
+    restart: unless-stopped
+    privileged: true
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+      - /dev/disk:/dev/disk:ro
+    networks:
+      - monitoring
+
+  # ──────────────────────────────────────────
+  # ELASTICSEARCH — stockage des logs
+  # ──────────────────────────────────────────
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.0
+    container_name: elasticsearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      # Limiter la heap JVM (ajustez selon votre RAM disponible)
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - xpack.security.enabled=false
+      # Désactiver le machine learning (économise ~500 Mo)
+      - xpack.ml.enabled=false
+      # Désactiver la surveillance interne
+      - xpack.monitoring.collection.enabled=false
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - monitoring
+
+  # ──────────────────────────────────────────
+  # LOGSTASH — traitement des logs
+  # ──────────────────────────────────────────
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.13.0
+    container_name: logstash
+    restart: unless-stopped
+    environment:
+      - LS_JAVA_OPTS=-Xms256m -Xmx256m
+    volumes:
+      - ./logstash/pipeline:/usr/share/logstash/pipeline:ro
+    networks:
+      - monitoring
+    depends_on:
+      - elasticsearch
+
+  # ──────────────────────────────────────────
+  # KIBANA — visualisation des logs
+  # ──────────────────────────────────────────
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.13.0
+    container_name: kibana
+    restart: unless-stopped
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.kibana.rule=Host(`kibana.devitlab.ddns.net`)
+      - traefik.http.routers.kibana.entrypoints=websecure
+      - traefik.http.routers.kibana.tls.certresolver=letsencrypt
+      - traefik.http.services.kibana.loadbalancer.server.port=5601
+    networks:
+      - traefik-net
+      - monitoring
+    depends_on:
+      - elasticsearch
+
+  # ──────────────────────────────────────────
+  # FILEBEAT — collecte des logs Docker
+  # ──────────────────────────────────────────
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:8.13.0
+    container_name: filebeat
+    restart: unless-stopped
+    user: root
+    volumes:
+      - ./filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - monitoring
+    depends_on:
+      - logstash
+
+# ──────────────────────────────────────────
+# VOLUMES persistants
+# ──────────────────────────────────────────
+volumes:
+  prometheus_data:
+  alertmanager_data:
+  grafana_data:
+  elasticsearch_data:
+
+# ──────────────────────────────────────────
+# RÉSEAUX
+# ──────────────────────────────────────────
+networks:
+  traefik-net:
+    external: true
+  monitoring:
+    driver: bridge
