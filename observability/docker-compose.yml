@@ -68,7 +68,7 @@ services:
     volumes:
       - grafana_data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
-      - grafana_dashboards:/etc/grafana/provisioning/dashboards/apps
+      - grafana_dashboards:/var/lib/grafana/dashboards/apps
     labels:
       - traefik.enable=true
       - traefik.docker.network=traefik-net
