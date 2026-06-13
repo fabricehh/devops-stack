@@ -18,17 +18,17 @@ def create_app(overrides: dict | None = None) -> Flask:
 
     setup_logging(app.config["LOG_LEVEL"])
 
+    # Base de données
     db.init_app(app)
     with app.app_context():
         db.create_all()
 
-    setup_prometheus(app)
-    setup_otel(app)
-
+    # Routes enregistrées AVANT l'instrumentation OTel
     app.register_blueprint(tasks_bp)
     app.register_blueprint(health_bp)
     app.register_blueprint(docs_bp)
 
+    # Error handlers
     @app.errorhandler(404)
     def not_found(err):
         return jsonify({"error": str(err.description)}), 404
@@ -40,5 +40,9 @@ def create_app(overrides: dict | None = None) -> Flask:
     @app.errorhandler(500)
     def internal_error(err):
         return jsonify({"error": "Erreur interne du serveur"}), 500
+
+    # Instrumentation après les routes (évite les conflits OTel/Flask)
+    setup_prometheus(app)
+    setup_otel(app)
 
     return app
