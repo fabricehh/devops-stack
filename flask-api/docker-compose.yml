@@ -8,6 +8,10 @@ services:
     labels:
       - traefik.enable=true
       - traefik.docker.network=traefik-net
+      # Auto-découverte Prometheus
+      - prometheus.io/scrape=true
+      - prometheus.io/port=5000
+      - prometheus.io/path=/metrics
       # Domaine de l'API
       - traefik.http.routers.flask-api.rule=Host(`flask-api.devitlab.ddns.net`)
       - traefik.http.routers.flask-api.entrypoints=websecure

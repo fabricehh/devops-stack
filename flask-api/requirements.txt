@@ -4,3 +4,4 @@ flasgger
 gunicorn
 prometheus-flask-exporter
 python-json-logger
+requests
