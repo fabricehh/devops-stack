@@ -13,6 +13,8 @@ handler.setFormatter(jsonlogger.JsonFormatter(
 ))
 logger.addHandler(handler)
 
+
+
 app = Flask(__name__)
 api = Api(app)
 swagger_config = Swagger.DEFAULT_CONFIG.copy()
