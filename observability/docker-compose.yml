@@ -206,9 +206,11 @@ services:
 volumes:
   prometheus_data:
   prometheus_rules:
+    name: prometheus_rules
   alertmanager_data:
   grafana_data:
   grafana_dashboards:
+    name: grafana_dashboards
   elasticsearch_data:
 
 # ──────────────────────────────────────────
