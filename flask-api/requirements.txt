@@ -1,4 +1,6 @@
 flask
 flask-restful
+flasgger
+gunicorn
 prometheus-flask-exporter
 python-json-logger

@@ -18,6 +18,7 @@ services:
       - prometheus_data:/prometheus
     labels:
       - traefik.enable=true
+      - traefik.docker.network=traefik-net
       - traefik.http.routers.prometheus.rule=Host(`prometheus.devitlab.ddns.net`)
       - traefik.http.routers.prometheus.entrypoints=websecure
       - traefik.http.routers.prometheus.tls.certresolver=letsencrypt
@@ -41,6 +42,7 @@ services:
       - alertmanager_data:/alertmanager
     labels:
       - traefik.enable=true
+      - traefik.docker.network=traefik-net
       - traefik.http.routers.alertmanager.rule=Host(`alertmanager.devitlab.ddns.net`)
       - traefik.http.routers.alertmanager.entrypoints=websecure
       - traefik.http.routers.alertmanager.tls.certresolver=letsencrypt
@@ -67,6 +69,7 @@ services:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
     labels:
       - traefik.enable=true
+      - traefik.docker.network=traefik-net
       - traefik.http.routers.grafana.rule=Host(`grafana.devitlab.ddns.net`)
       - traefik.http.routers.grafana.entrypoints=websecure
       - traefik.http.routers.grafana.tls.certresolver=letsencrypt
@@ -167,6 +170,7 @@ services:
       - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
     labels:
       - traefik.enable=true
+      - traefik.docker.network=traefik-net
       - traefik.http.routers.kibana.rule=Host(`kibana.devitlab.ddns.net`)
       - traefik.http.routers.kibana.entrypoints=websecure
       - traefik.http.routers.kibana.tls.certresolver=letsencrypt

@@ -1,13 +1,10 @@
 import logging
-import time
-from flask import Flask, request
+from flask import Flask
 from flask_restful import Resource, Api
+from flasgger import Swagger
 from prometheus_flask_exporter import PrometheusMetrics
 from pythonjsonlogger import jsonlogger
 
-# ──────────────────────────────────────────
-# LOGS JSON (pour Filebeat → Logstash → ES)
-# ──────────────────────────────────────────
 logger = logging.getLogger("flask-api")
 logger.setLevel(logging.INFO)
 handler = logging.StreamHandler()
@@ -18,14 +15,13 @@ logger.addHandler(handler)
 
 app = Flask(__name__)
 api = Api(app)
+swagger_config = Swagger.DEFAULT_CONFIG.copy()
+swagger_config["specs_route"] = "/swagger/"
+swagger = Swagger(app, config=swagger_config)
 
-# ──────────────────────────────────────────
-# MÉTRIQUES PROMETHEUS (expose /metrics)
-# ──────────────────────────────────────────
 metrics = PrometheusMetrics(app)
 metrics.info("app_info", "Informations API Flask", version="1.0.0")
 
-# Compteur personnalisé
 hello_counter = metrics.counter(
     "hello_requests_total", "Nombre de requêtes sur /",
     labels={"status": lambda r: r.status_code}
@@ -35,11 +31,18 @@ hello_counter = metrics.counter(
 class HelloWorld(Resource):
     @hello_counter
     def get(self):
-        logger.info("Requête reçue sur /", extra={
-            "endpoint": "/",
-            "method": "GET",
-            "remote_addr": request.remote_addr,
-        })
+        """Retourne un message de bienvenue.
+        ---
+        responses:
+          200:
+            description: Message de bienvenue
+            schema:
+              properties:
+                hello:
+                  type: string
+                  example: world
+        """
+        logger.info("Requête reçue sur /", extra={"endpoint": "/", "method": "GET"})
         return {"hello": "world"}
 
 

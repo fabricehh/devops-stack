@@ -2,6 +2,7 @@ services:
   traefik:
     image: traefik:v3.0
     container_name: traefik
+    restart: unless-stopped
 
     command:
       # Activation du dashboard
@@ -16,7 +17,7 @@ services:
       - --entrypoints.websecure.address=:443
 
       # Let's Encrypt — remplacez l'email par le vôtre
-      - --certificatesresolvers.letsencrypt.acme.email=youremail@example.com
+      - --certificatesresolvers.letsencrypt.acme.email=huehanou.houessou@gmail.com
       - --certificatesresolvers.letsencrypt.acme.storage=/acme.json
       - --certificatesresolvers.letsencrypt.acme.httpchallenge=true
       - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web

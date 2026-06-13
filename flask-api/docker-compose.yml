@@ -1,13 +1,15 @@
 services:
   flask-api:
     build: .
+    image: flask-api-image
     container_name: flask-api
     restart: unless-stopped
 
     labels:
       - traefik.enable=true
+      - traefik.docker.network=traefik-net
       # Domaine de l'API
-      - traefik.http.routers.flask-api.rule=Host(`api.devitlab.ddns.net`)
+      - traefik.http.routers.flask-api.rule=Host(`flask-api.devitlab.ddns.net`)
       - traefik.http.routers.flask-api.entrypoints=websecure
       - traefik.http.routers.flask-api.tls.certresolver=letsencrypt
       # Port interne du conteneur Flask
