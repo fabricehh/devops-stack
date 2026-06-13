@@ -1,43 +1,106 @@
 groups:
-  - name: systeme
+
+  # ─── Critical ─────────────────────────────────────────────────────────────
+
+  - name: critical
     rules:
 
-      # Alerte si un service est down
-      - alert: ServiceDown
-        expr: up == 0
+      - alert: ApplicationDown
+        expr: up{job=~"otel-app-metrics|.*app.*"} == 0
         for: 1m
         labels:
           severity: critical
         annotations:
-          summary: "Service {{ $labels.job }} est DOWN"
-          description: "Le service {{ $labels.job }} ne répond plus depuis 1 minute."
+          summary: "Application DOWN — {{ $labels.instance }}"
+          description: "L'application {{ $labels.instance }} ne répond plus depuis plus d'1 minute."
 
-      # Alerte CPU > 85%
+      - alert: ContainerDown
+        expr: absent(container_last_seen{name!=""}) or time() - container_last_seen{name!=""} > 60
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Container DOWN — {{ $labels.name }}"
+          description: "Le container {{ $labels.name }} est arrêté ou inaccessible."
+
+      - alert: NodeDown
+        expr: up{job=~"node-exporter.*"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Serveur DOWN — {{ $labels.instance }}"
+          description: "Le serveur {{ $labels.instance }} ne répond plus."
+
+      - alert: DiskCritical
+        expr: (node_filesystem_avail_bytes{mountpoint="/",fstype!="tmpfs"} / node_filesystem_size_bytes{mountpoint="/",fstype!="tmpfs"}) * 100 < 5
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Disque critique — {{ $labels.instance }}"
+          description: "Espace disque restant : {{ $value | printf \"%.1f\" }}% sur {{ $labels.instance }}."
+
+  # ─── Warning ──────────────────────────────────────────────────────────────
+
+  - name: warning
+    rules:
+
       - alert: HighCPU
-        expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 85
-        for: 2m
-        labels:
-          severity: warning
-        annotations:
-          summary: "CPU élevé sur {{ $labels.instance }}"
-          description: "CPU > 85% depuis 2 minutes."
-
-      # Alerte RAM > 90%
-      - alert: HighMemory
-        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 90
-        for: 2m
-        labels:
-          severity: warning
-        annotations:
-          summary: "RAM élevée sur {{ $labels.instance }}"
-          description: "Mémoire > 90% depuis 2 minutes."
-
-      # Alerte disque > 80%
-      - alert: DiskSpaceLow
-        expr: (1 - (node_filesystem_avail_bytes{fstype!="tmpfs"} / node_filesystem_size_bytes)) * 100 > 80
+        expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
         for: 5m
         labels:
           severity: warning
         annotations:
-          summary: "Espace disque faible sur {{ $labels.instance }}"
-          description: "Disque {{ $labels.mountpoint }} > 80%."
+          summary: "CPU élevé — {{ $labels.instance }}"
+          description: "CPU à {{ $value | printf \"%.1f\" }}% depuis 5 minutes sur {{ $labels.instance }}."
+
+      - alert: HighMemory
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "RAM élevée — {{ $labels.instance }}"
+          description: "RAM utilisée à {{ $value | printf \"%.1f\" }}% sur {{ $labels.instance }}."
+
+      - alert: HighResponseTime
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Temps de réponse élevé — {{ $labels.instance }}"
+          description: "P95 temps de réponse = {{ $value | printf \"%.2f\" }}s sur {{ $labels.job }}."
+
+      - alert: DiskWarning
+        expr: (node_filesystem_avail_bytes{mountpoint="/",fstype!="tmpfs"} / node_filesystem_size_bytes{mountpoint="/",fstype!="tmpfs"}) * 100 < 20
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Disque bas — {{ $labels.instance }}"
+          description: "Espace disque restant : {{ $value | printf \"%.1f\" }}% sur {{ $labels.instance }}."
+
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Taux d'erreurs 5xx élevé — {{ $labels.job }}"
+          description: "{{ $value | humanizePercentage }} des requêtes retournent 5xx sur {{ $labels.job }}."
+
+  # ─── Info ─────────────────────────────────────────────────────────────────
+
+  - name: info
+    rules:
+
+      - alert: ContainerRestarted
+        expr: increase(kube_pod_container_status_restarts_total[15m]) > 0 or increase(container_start_time_seconds[15m]) > 0
+        for: 0m
+        labels:
+          severity: info
+        annotations:
+          summary: "Container redémarré — {{ $labels.name }}"
+          description: "Le container {{ $labels.name }} a redémarré."

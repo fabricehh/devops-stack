@@ -1,0 +1,40 @@
+version: "3.9"
+
+# Rejoindre le réseau de la stack observabilité pour accéder à l'OTel Collector
+networks:
+  observability_monitoring:
+    external: true
+
+volumes:
+  task_data:
+
+services:
+
+  task-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: task-api
+    restart: unless-stopped
+    environment:
+      # Stockage
+      - DATABASE_URL=sqlite:////app/data/tasks.db
+
+      # OpenTelemetry — pointe vers l'OTel Collector de la stack observabilité
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcollector:4317
+      - OTEL_SERVICE_NAME=task-api
+      - SERVICE_VERSION=1.0.0
+      - DEPLOYMENT_ENVIRONMENT=production
+
+      - LOG_LEVEL=INFO
+    volumes:
+      - task_data:/app/data
+    ports:
+      - "5000:5000"
+    networks:
+      - observability_monitoring
+    labels:
+      # Prometheus scrape direct (en plus des métriques OTel)
+      - "prometheus.scrape=true"
+      - "prometheus.port=5000"
+      - "prometheus.path=/metrics"

@@ -1,223 +1,177 @@
+version: "3.9"
+
+networks:
+  traefik-net:
+    external: true
+  monitoring:
+    name: observability_monitoring
+    driver: bridge
+
+volumes:
+  prometheus_data:
+  alertmanager_data:
+  grafana_data:
+  loki_data:
+  tempo_data:
+
 services:
 
-  # ──────────────────────────────────────────
-  # PROMETHEUS — collecte des métriques
-  # ──────────────────────────────────────────
+  # ─── Metrics ──────────────────────────────────────────────────────────────
+
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v2.52.0
     container_name: prometheus
     restart: unless-stopped
     command:
-      - --config.file=/etc/prometheus/prometheus.yml
-      - --storage.tsdb.path=/prometheus
-      - --storage.tsdb.retention.time=15d
-      - --web.enable-lifecycle
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
+      - "--web.console.libraries=/etc/prometheus/console_libraries"
+      - "--web.console.templates=/etc/prometheus/consoles"
+      - "--web.enable-lifecycle"
+      - "--web.enable-remote-write-receiver"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prometheus_rules:/etc/prometheus/rules
+      - ./prometheus/rules:/etc/prometheus/rules:ro
+      - ./prometheus/targets:/etc/prometheus/targets:ro
       - prometheus_data:/prometheus
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    labels:
-      - traefik.enable=true
-      - traefik.docker.network=traefik-net
-      - traefik.http.routers.prometheus.rule=Host(`prometheus.devitlab.ddns.net`)
-      - traefik.http.routers.prometheus.entrypoints=websecure
-      - traefik.http.routers.prometheus.tls.certresolver=letsencrypt
-      - traefik.http.services.prometheus.loadbalancer.server.port=9090
     networks:
-      - traefik-net
       - monitoring
-
-  # ──────────────────────────────────────────
-  # ALERTMANAGER — gestion des alertes
-  # ──────────────────────────────────────────
-  alertmanager:
-    image: prom/alertmanager:latest
-    container_name: alertmanager
-    restart: unless-stopped
-    command:
-      - --config.file=/etc/alertmanager/alertmanager.yml
-      - --storage.path=/alertmanager
-    volumes:
-      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
-      - alertmanager_data:/alertmanager
+      - traefik-net
     labels:
-      - traefik.enable=true
-      - traefik.docker.network=traefik-net
-      - traefik.http.routers.alertmanager.rule=Host(`alertmanager.devitlab.ddns.net`)
-      - traefik.http.routers.alertmanager.entrypoints=websecure
-      - traefik.http.routers.alertmanager.tls.certresolver=letsencrypt
-      - traefik.http.services.alertmanager.loadbalancer.server.port=9093
-    networks:
-      - traefik-net
-      - monitoring
+      - "traefik.enable=true"
+      - "traefik.http.routers.prometheus.rule=Host(`prometheus.devitlab.ddns.net`)"
+      - "traefik.http.routers.prometheus.entrypoints=websecure"
+      - "traefik.http.routers.prometheus.tls.certresolver=letsencrypt"
+      - "traefik.http.services.prometheus.loadbalancer.server.port=9090"
 
-  # ──────────────────────────────────────────
-  # GRAFANA — dashboards & visualisation
-  # ──────────────────────────────────────────
-  grafana:
-    image: grafana/grafana:latest
-    container_name: grafana
-    restart: unless-stopped
-    environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=changeme
-      - GF_SERVER_DOMAIN=grafana.devitlab.ddns.net
-      - GF_SERVER_ROOT_URL=https://grafana.devitlab.ddns.net
-      - GF_USERS_ALLOW_SIGN_UP=false
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning:ro
-      - grafana_dashboards:/var/lib/grafana/dashboards/apps
-    labels:
-      - traefik.enable=true
-      - traefik.docker.network=traefik-net
-      - traefik.http.routers.grafana.rule=Host(`grafana.devitlab.ddns.net`)
-      - traefik.http.routers.grafana.entrypoints=websecure
-      - traefik.http.routers.grafana.tls.certresolver=letsencrypt
-      - traefik.http.services.grafana.loadbalancer.server.port=3000
-    networks:
-      - traefik-net
-      - monitoring
-
-  # ──────────────────────────────────────────
-  # NODE EXPORTER — métriques système
-  # ──────────────────────────────────────────
   node-exporter:
-    image: prom/node-exporter:latest
+    image: prom/node-exporter:v1.8.1
     container_name: node-exporter
     restart: unless-stopped
     pid: host
+    command:
+      - "--path.rootfs=/host"
+      - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
     volumes:
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
-      - /:/rootfs:ro
-    command:
-      - --path.procfs=/host/proc
-      - --path.sysfs=/host/sys
-      - --path.rootfs=/rootfs
+      - /:/host:ro,rslave
     networks:
       - monitoring
 
-  # ──────────────────────────────────────────
-  # CADVISOR — métriques des conteneurs Docker
-  # ──────────────────────────────────────────
   cadvisor:
-    image: gcr.io/cadvisor/cadvisor:latest
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
     container_name: cadvisor
     restart: unless-stopped
     privileged: true
+    devices:
+      - /dev/kmsg
     volumes:
       - /:/rootfs:ro
       - /var/run:/var/run:ro
       - /sys:/sys:ro
       - /var/lib/docker:/var/lib/docker:ro
-      - /dev/disk:/dev/disk:ro
+      - /cgroup:/cgroup:ro
     networks:
       - monitoring
 
-  # ──────────────────────────────────────────
-  # ELASTICSEARCH — stockage des logs
-  # ──────────────────────────────────────────
-  elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.0
-    container_name: elasticsearch
+  # ─── Logs ─────────────────────────────────────────────────────────────────
+
+  loki:
+    image: grafana/loki:3.0.0
+    container_name: loki
     restart: unless-stopped
-    environment:
-      - discovery.type=single-node
-      # Limiter la heap JVM (ajustez selon votre RAM disponible)
-      - ES_JAVA_OPTS=-Xms512m -Xmx512m
-      - xpack.security.enabled=false
-      # Désactiver le machine learning (économise ~500 Mo)
-      - xpack.ml.enabled=false
-      # Désactiver la surveillance interne
-      - xpack.monitoring.collection.enabled=false
-    deploy:
-      resources:
-        limits:
-          memory: 1g
-    ulimits:
-      memlock:
-        soft: -1
-        hard: -1
+    command: -config.file=/etc/loki/loki-config.yaml
     volumes:
-      - elasticsearch_data:/usr/share/elasticsearch/data
+      - ./loki/loki-config.yaml:/etc/loki/loki-config.yaml:ro
+      - loki_data:/loki
     networks:
       - monitoring
 
-  # ──────────────────────────────────────────
-  # LOGSTASH — traitement des logs
-  # ──────────────────────────────────────────
-  logstash:
-    image: docker.elastic.co/logstash/logstash:8.13.0
-    container_name: logstash
+  # ─── Traces ───────────────────────────────────────────────────────────────
+
+  tempo:
+    image: grafana/tempo:2.5.0
+    container_name: tempo
     restart: unless-stopped
-    environment:
-      - LS_JAVA_OPTS=-Xms256m -Xmx256m
+    command: ["-config.file=/etc/tempo/tempo-config.yaml"]
     volumes:
-      - ./logstash/pipeline:/usr/share/logstash/pipeline:ro
+      - ./tempo/tempo-config.yaml:/etc/tempo/tempo-config.yaml:ro
+      - tempo_data:/var/tempo
     networks:
       - monitoring
-    depends_on:
-      - elasticsearch
 
-  # ──────────────────────────────────────────
-  # KIBANA — visualisation des logs
-  # ──────────────────────────────────────────
-  kibana:
-    image: docker.elastic.co/kibana/kibana:8.13.0
-    container_name: kibana
+  # ─── OpenTelemetry Collector ───────────────────────────────────────────────
+
+  otelcollector:
+    image: otel/opentelemetry-collector-contrib:0.101.0
+    container_name: otelcollector
     restart: unless-stopped
-    environment:
-      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
-    labels:
-      - traefik.enable=true
-      - traefik.docker.network=traefik-net
-      - traefik.http.routers.kibana.rule=Host(`kibana.devitlab.ddns.net`)
-      - traefik.http.routers.kibana.entrypoints=websecure
-      - traefik.http.routers.kibana.tls.certresolver=letsencrypt
-      - traefik.http.services.kibana.loadbalancer.server.port=5601
+    command: ["--config=/etc/otelcol/otelcol-config.yaml"]
+    volumes:
+      - ./otelcollector/otelcol-config.yaml:/etc/otelcol/otelcol-config.yaml:ro
+    ports:
+      - "4317:4317"   # OTLP gRPC — applications send here
+      - "4318:4318"   # OTLP HTTP — applications send here
+      - "8888:8888"   # OTel Collector internal metrics
+      - "8889:8889"   # Prometheus scrape endpoint (app metrics)
     networks:
+      - monitoring
+
+  # ─── Alerting ─────────────────────────────────────────────────────────────
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: alertmanager
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    networks:
+      - monitoring
       - traefik-net
-      - monitoring
-    depends_on:
-      - elasticsearch
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.alertmanager.rule=Host(`alertmanager.devitlab.ddns.net`)"
+      - "traefik.http.routers.alertmanager.entrypoints=websecure"
+      - "traefik.http.routers.alertmanager.tls.certresolver=letsencrypt"
+      - "traefik.http.services.alertmanager.loadbalancer.server.port=9093"
 
-  # ──────────────────────────────────────────
-  # FILEBEAT — collecte des logs Docker
-  # ──────────────────────────────────────────
-  filebeat:
-    image: docker.elastic.co/beats/filebeat:8.13.0
-    container_name: filebeat
+  # ─── Dashboards ───────────────────────────────────────────────────────────
+
+  grafana:
+    image: grafana/grafana:11.0.0
+    container_name: grafana
     restart: unless-stopped
-    user: root
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GF_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GF_ADMIN_PASSWORD:-changeme}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=https://grafana.devitlab.ddns.net
+      - GF_SMTP_ENABLED=true
+      - GF_SMTP_HOST=smtp.office365.com:587
+      - GF_SMTP_USER=${SMTP_USER}
+      - GF_SMTP_PASSWORD=${SMTP_PASSWORD}
+      - GF_SMTP_FROM_ADDRESS=${SMTP_USER}
+      - GF_SMTP_STARTTLS_POLICY=MandatoryStartTLS
+      - GF_FEATURE_TOGGLES_ENABLE=traceqlEditor
     volumes:
-      - ./filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
-      - /var/lib/docker/containers:/var/lib/docker/containers:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
     networks:
       - monitoring
+      - traefik-net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.grafana.rule=Host(`grafana.devitlab.ddns.net`)"
+      - "traefik.http.routers.grafana.entrypoints=websecure"
+      - "traefik.http.routers.grafana.tls.certresolver=letsencrypt"
+      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
     depends_on:
-      - logstash
-
-# ──────────────────────────────────────────
-# VOLUMES persistants
-# ──────────────────────────────────────────
-volumes:
-  prometheus_data:
-  prometheus_rules:
-    name: prometheus_rules
-  alertmanager_data:
-  grafana_data:
-  grafana_dashboards:
-    name: grafana_dashboards
-  elasticsearch_data:
-
-# ──────────────────────────────────────────
-# RÉSEAUX
-# ──────────────────────────────────────────
-networks:
-  traefik-net:
-    external: true
-  monitoring:
-    driver: bridge
+      - prometheus
+      - loki
+      - tempo
