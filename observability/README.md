@@ -1,51 +1,44 @@
-# 📊 Stack Observabilité — Infrastructure mutualisée
+# Stack Observabilité — Infrastructure mutualisée
 
-> Plateforme de monitoring partagée pour **toutes vos apps actuelles et futures**.
+> Plateforme de monitoring partagée pour toutes vos apps actuelles et futures.
 > Métriques (Prometheus) · Logs (EFK) · Alerting (Alertmanager) · Dashboards (Grafana/Kibana)
 
 ## Architecture
 
 ```
-~/observability/
+observability/
 ├── docker-compose.yml
-├── setup-retention.sh          # Politique ILM (rétention logs 7 jours)
 ├── prometheus/
-│   ├── prometheus.yml          # ← AJOUTEZ ICI vos nouvelles apps à scraper
+│   ├── prometheus.yml          # Scraping via Docker SD (auto-découverte)
 │   └── rules/
-│       └── alerts.yml          # ← AJOUTEZ ICI vos règles d'alerte
+│       └── alerts.yml          # Alertes système génériques uniquement
 ├── alertmanager/
-│   └── alertmanager.yml        # Slack + email
+│   └── alertmanager.yml        # Slack + email (à configurer une seule fois)
 ├── grafana/
 │   └── provisioning/
 │       ├── datasources/        # Prometheus + Elasticsearch auto-configurés
-│       └── dashboards/
+│       └── dashboards/         # Dashboards système ; apps → volume grafana_dashboards
 ├── filebeat/
-│   └── filebeat.yml            # Collecte AUTOMATIQUE des logs de TOUS les conteneurs
+│   └── filebeat.yml            # Collecte automatique de tous les conteneurs
 └── logstash/
-    └── pipeline/
-        └── logstash.conf
+    └── pipeline/logstash.conf
 ```
 
-## Avant de lancer
-
-1. **alertmanager/alertmanager.yml** : remplacez le webhook Slack et les identifiants SMTP
-2. **docker-compose.yml** : adaptez les domaines `*.devitlab.ddns.net` si besoin
-3. Le réseau `traefik-net` doit exister : `docker network create traefik-net`
-
-## Déploiement
+## Déploiement initial
 
 ```bash
+# 1. Configurer alertmanager/alertmanager.yml (Slack webhook + SMTP)
+# 2. Lancer la stack
 docker compose up -d
-docker ps --format "table {{.Names}}\t{{.Status}}"
 
-# Rétention des logs (une seule fois, attendre ~1 min qu'ES démarre)
+# 3. Politique de rétention logs (attendre ~1 min qu'Elasticsearch démarre)
 ./setup-retention.sh
 ```
 
 ## Accès
 
 | Service | URL | Identifiants |
-|---------|-----|-------------|
+|---|---|---|
 | Grafana | https://grafana.devitlab.ddns.net | admin / changeme |
 | Prometheus | https://prometheus.devitlab.ddns.net | — |
 | Alertmanager | https://alertmanager.devitlab.ddns.net | — |
@@ -53,32 +46,143 @@ docker ps --format "table {{.Names}}\t{{.Status}}"
 
 ---
 
-## 🔌 Brancher une nouvelle app (procédure standard)
+## Guide par outil
 
-### 1. Logs → automatique ✅
+### Prometheus — Métriques
 
-Filebeat collecte déjà les logs de **tous les conteneurs Docker**.
-Pour des logs structurés, faites sortir du **JSON sur stdout** dans votre app.
-Dans Kibana, filtrez avec `container.name: "mon-app"`.
+**Voir les targets (apps scrapées) :**
+```
+https://prometheus.devitlab.ddns.net/targets
+```
+Toute app avec le label `prometheus.io/scrape=true` apparaît automatiquement.
 
-### 2. Métriques → 2 étapes
+**Requêtes utiles :**
+```promql
+# Vérifier qu'une app répond
+up{job="flask-api"}
 
-**a)** Exposez un endpoint `/metrics` dans votre app
-(ex: `prometheus-flask-exporter` en Python, `micrometer` en Java, `prom-client` en Node).
+# Taux de requêtes / seconde
+rate(flask_http_request_total{job="flask-api"}[1m])
 
-**b)** Ajoutez le job dans `prometheus/prometheus.yml` :
+# Latence p95
+histogram_quantile(0.95, sum(rate(flask_http_request_duration_seconds_bucket{job="flask-api"}[5m])) by (le))
 
-```yaml
-  - job_name: mon-app
-    static_configs:
-      - targets: ['mon-app:8080']
+# CPU système
+100 - (avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)
+
+# RAM utilisée
+(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100
 ```
 
-Puis rechargez : `curl -X POST http://localhost:9090/-/reload`
+**Recharger la config sans redémarrer :**
+```bash
+curl -X POST http://localhost:9090/-/reload
+```
 
-### 3. Réseau → connecter l'app au réseau monitoring
+---
 
-Dans le `docker-compose.yml` de votre app :
+### Grafana — Dashboards
+
+**Accès :** https://grafana.devitlab.ddns.net (admin / changeme)
+
+**Dashboards recommandés à importer (via Dashboards → Import → ID) :**
+
+| Dashboard | ID Grafana |
+|---|---|
+| Node Exporter Full (système) | 1860 |
+| Docker cAdvisor (conteneurs) | 14282 |
+| Traefik | 17346 |
+| Flask Exporter | 9688 |
+
+**Dashboards par app :**
+Chaque app pousse son propre dashboard via son service `monitoring-init`.
+Ils apparaissent automatiquement dans **Dashboards → Browse** (rechargement toutes les 30s).
+
+**Créer une alerte visuelle :**
+1. Ouvrir un panel → Edit
+2. Onglet **Alert** → New alert rule
+3. Définir la condition et le receiver (Alertmanager)
+
+---
+
+### Alertmanager — Alerting
+
+**Accès :** https://alertmanager.devitlab.ddns.net
+
+**Voir les alertes actives :**
+```
+https://alertmanager.devitlab.ddns.net/#/alerts
+```
+
+**Silencer une alerte temporairement :**
+1. Cliquer sur l'alerte → **Silence**
+2. Définir la durée et un commentaire
+
+**Routing :**
+- `severity: warning` → Slack `#alertes`
+- `severity: critical` → Slack + email immédiat (repeat 30 min)
+
+**Tester l'envoi d'une alerte :**
+```bash
+curl -X POST http://localhost:9093/api/v2/alerts \
+  -H "Content-Type: application/json" \
+  -d '[{"labels":{"alertname":"TestAlerte","severity":"warning","job":"test"}}]'
+```
+
+**Chaque app apporte ses propres règles** dans `monitoring/alerts.yml`,
+poussées au démarrage via le service `monitoring-init`.
+
+---
+
+### Kibana — Logs
+
+**Accès :** https://kibana.devitlab.ddns.net
+
+**Premier démarrage — créer l'index pattern :**
+1. Menu → **Stack Management** → Index Patterns → Create
+2. Pattern : `filebeat-*` — Time field : `@timestamp`
+
+**Voir les logs d'une app :**
+1. Menu → **Discover**
+2. Filtre KQL : `container.name: "flask-api"`
+3. Colonnes utiles : `@timestamp`, `message`, `log.level`
+
+**Filtres KQL utiles :**
+```kql
+# Logs d'une app
+container.name: "flask-api"
+
+# Erreurs uniquement
+container.name: "flask-api" AND log.level: "ERROR"
+
+# Recherche dans le message
+container.name: "flask-api" AND message: "500"
+
+# Plusieurs apps
+container.name: ("flask-api" OR "mon-autre-app")
+```
+
+**Chaque app apporte son propre dashboard Kibana** (`monitoring/kibana.ndjson`),
+importé automatiquement via le service `monitoring-init`.
+
+---
+
+## Brancher une nouvelle app
+
+Aucune modification de cette stack. Dans chaque app, ajouter :
+
+### 1. Labels Docker (métriques + Traefik)
+
+```yaml
+labels:
+  - traefik.enable=true
+  - traefik.docker.network=traefik-net
+  - prometheus.io/scrape=true
+  - prometheus.io/port=<port>
+  - prometheus.io/path=/metrics
+```
+
+### 2. Réseau monitoring
 
 ```yaml
 networks:
@@ -87,27 +191,48 @@ networks:
     name: observability_monitoring
 ```
 
-### 4. Alertes → ajouter vos règles
+### 3. Dossier monitoring/ dans l'app
 
-Dans `prometheus/rules/alerts.yml`, ajoutez un groupe pour votre app
-(voir le groupe `flask-api` comme modèle), puis rechargez Prometheus.
+```
+mon-app/monitoring/
+├── alerts.yml        # règles Prometheus
+├── dashboard.json    # dashboard Grafana
+└── kibana.ndjson     # saved objects Kibana
+```
 
-> 📦 Voir le dossier **flask-api/** (livré à côté) : app démo complète qui suit cette procédure.
+### 4. Service monitoring-init
+
+```yaml
+monitoring-init:
+  image: alpine/curl
+  restart: "no"
+  volumes:
+    - ./monitoring/alerts.yml:/tmp/alerts.yml:ro
+    - ./monitoring/dashboard.json:/tmp/dashboard.json:ro
+    - ./monitoring/kibana.ndjson:/tmp/kibana.ndjson:ro
+    - prometheus_rules:/prometheus_rules
+    - grafana_dashboards:/grafana_dashboards
+  command: >
+    sh -c "
+      cp /tmp/alerts.yml /prometheus_rules/mon-app.yml &&
+      cp /tmp/dashboard.json /grafana_dashboards/mon-app.json &&
+      sleep 5 &&
+      curl -s -X POST http://prometheus:9090/-/reload &&
+      curl -s -X POST http://kibana:5601/api/saved_objects/_import?overwrite=true
+        -H 'kbn-xsrf: true' -F file=@/tmp/kibana.ndjson
+    "
+  networks:
+    - monitoring
+```
+
+> Voir **flask-api/** comme exemple de référence complet.
 
 ---
-
-## Dashboards Grafana à importer
-
-| Dashboard | ID |
-|-----------|----|
-| Node Exporter Full | 1860 |
-| Docker cAdvisor | 14282 |
-| Traefik | 17346 |
-| Flask exporter | 9688 |
 
 ## Debug
 
 ```bash
+# Logs des services
 docker logs -f prometheus
 docker logs -f elasticsearch
 docker logs -f filebeat
@@ -118,10 +243,10 @@ curl http://localhost:9090/api/v1/targets
 # Index Elasticsearch
 curl http://localhost:9200/_cat/indices?v
 
-# Recharger Prometheus après modif
-curl -X POST http://localhost:9090/-/reload
+# Alertes actives
+curl http://localhost:9093/api/v2/alerts
 ```
 
 ## RAM estimée
 
-~2 à 2,5 Go pour l'ensemble (Elasticsearch limité à 1 Go, Logstash 256 Mo heap).
+~2 à 2,5 Go (Elasticsearch limité à 1 Go, Logstash 256 Mo heap).

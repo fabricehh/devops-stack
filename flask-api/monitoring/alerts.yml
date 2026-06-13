@@ -1,0 +1,38 @@
+groups:
+  - name: flask-api
+    rules:
+
+      - alert: FlaskAPIDown
+        expr: up{job="flask-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          app: flask-api
+        annotations:
+          summary: "flask-api est DOWN"
+          description: "flask-api ne répond plus depuis 1 minute."
+
+      - alert: FlaskAPIHighErrorRate
+        expr: |
+          sum(rate(flask_http_request_total{job="flask-api", status=~"5.."}[5m]))
+          / sum(rate(flask_http_request_total{job="flask-api"}[5m])) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+          app: flask-api
+        annotations:
+          summary: "Taux d'erreurs 5xx élevé — flask-api"
+          description: "Plus de 5% des requêtes échouent depuis 2 minutes."
+
+      - alert: FlaskAPIHighLatency
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(flask_http_request_duration_seconds_bucket{job="flask-api"}[5m])) by (le)
+          ) > 1
+        for: 5m
+        labels:
+          severity: warning
+          app: flask-api
+        annotations:
+          summary: "Latence élevée — flask-api"
+          description: "Le p95 dépasse 1 seconde depuis 5 minutes."

@@ -14,7 +14,7 @@ services:
       - --web.enable-lifecycle
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - ./prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_rules:/etc/prometheus/rules
       - prometheus_data:/prometheus
       - /var/run/docker.sock:/var/run/docker.sock:ro
     labels:
@@ -68,6 +68,7 @@ services:
     volumes:
       - grafana_data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_dashboards:/etc/grafana/provisioning/dashboards/apps
     labels:
       - traefik.enable=true
       - traefik.docker.network=traefik-net
@@ -204,8 +205,10 @@ services:
 # ──────────────────────────────────────────
 volumes:
   prometheus_data:
+  prometheus_rules:
   alertmanager_data:
   grafana_data:
+  grafana_dashboards:
   elasticsearch_data:
 
 # ──────────────────────────────────────────

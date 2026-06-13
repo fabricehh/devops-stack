@@ -21,12 +21,46 @@ services:
 
     networks:
       - traefik-net
-      - monitoring   # pour que Prometheus puisse scraper /metrics
+      - monitoring
+
+  # Pousse alerts + dashboard + kibana dans les volumes partagés puis recharge Prometheus
+  monitoring-init:
+    image: alpine/curl
+    container_name: flask-api-monitoring-init
+    restart: "no"
+    volumes:
+      - ./monitoring/alerts.yml:/tmp/alerts.yml:ro
+      - ./monitoring/dashboard.json:/tmp/dashboard.json:ro
+      - ./monitoring/kibana.ndjson:/tmp/kibana.ndjson:ro
+      - prometheus_rules:/prometheus_rules
+      - grafana_dashboards:/grafana_dashboards
+    command: >
+      sh -c "
+        echo '>>> Prometheus alerts...' &&
+        cp /tmp/alerts.yml /prometheus_rules/flask-api.yml &&
+        echo '>>> Grafana dashboard...' &&
+        cp /tmp/dashboard.json /grafana_dashboards/flask-api.json &&
+        echo '>>> Prometheus reload...' &&
+        sleep 5 &&
+        curl -s -X POST http://prometheus:9090/-/reload &&
+        echo '>>> Kibana saved objects...' &&
+        curl -s -X POST http://kibana:5601/api/saved_objects/_import?overwrite=true \
+          -H 'kbn-xsrf: true' \
+          -F file=@/tmp/kibana.ndjson &&
+        echo 'Monitoring config pushed.'
+      "
+    networks:
+      - monitoring
 
 networks:
   traefik-net:
     external: true
-  # Réseau de la stack observability (préfixé par le nom du dossier)
   monitoring:
     external: true
     name: observability_monitoring
+
+volumes:
+  prometheus_rules:
+    external: true
+  grafana_dashboards:
+    external: true
