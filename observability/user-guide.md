@@ -1,489 +1,310 @@
 # Guide Utilisateur — Plateforme Observabilité
 
-## Prérequis
+> Ce guide explique comment **utiliser** la plateforme au quotidien.  
+> Pas de configuration, pas de code — juste ce que vous voyez à l'écran.
 
-| Élément | Version minimale |
+---
+
+## Avant de commencer — Générer des données
+
+Les dashboards sont vides sans trafic. Lancez le générateur de charge pour voir quelque chose immédiatement.
+
+**Ouvrir un terminal sur le serveur et lancer :**
+
+```bash
+cd devops-stack
+python demo-app/load_test.py --duration 300 --rps 10
+```
+
+Cela envoie **10 requêtes par seconde pendant 5 minutes** sur la Task API.  
+Laissez tourner en arrière-plan pendant que vous explorez les dashboards.
+
+> **Sans Python installé**, utiliser Docker :
+> ```bash
+> docker run --rm --network observability_monitoring \
+>   -e API_URL=http://task-api:5000 \
+>   python:3.12-slim bash -c \
+>   "pip install requests -q && python /app/load_test.py --duration 300 --rps 10" \
+>   -v $(pwd)/demo-app/load_test.py:/app/load_test.py
+> ```
+
+---
+
+## Grafana — Vos tableaux de bord
+
+**Accès :** https://grafana.devitlab.ddns.net  
+**Login :** `admin` / mot de passe défini dans `.env`
+
+---
+
+### Naviguer vers les dashboards
+
+Une fois connecté :
+
+1. Cliquer sur **Dashboards** dans le menu de gauche (icône grille)
+2. Cliquer sur le dossier **Infrastructure**
+3. Vous voyez les 5 dashboards
+
+---
+
+### Dashboard Infrastructure — Santé du serveur
+
+**À quoi ça sert :** Surveiller que le serveur ne sature pas.
+
+Ouvrir **Infrastructure → Infrastructure**
+
+Ce que vous voyez :
+
+| Panneau | Lecture |
 |---|---|
-| Docker | 24.x |
-| Docker Compose Plugin | 2.x |
-| Traefik | v3 (déjà déployé) |
-| Domaine DNS | devitlab.ddns.net |
-| Ports ouverts | 80, 443, 4317, 4318 |
+| **CPU Usage** | Courbe par serveur. Rouge = > 95%, orange = > 80% |
+| **RAM Usage** | Idem. Si proche de 100% → redémarrer des containers |
+| **Disque Usage** | Monte lentement. Alerte à 80% puis 95% |
+| **Réseau** | Trafic entrant (RX) et sortant (TX) en bytes/s |
+
+**Ce qu'il faut surveiller :** Une courbe qui monte progressivement sans redescendre.
 
 ---
 
-## 1. Installation
+### Dashboard Docker — Vos containers
 
-### 1.1 Cloner le dépôt
+**À quoi ça sert :** Voir ce que chaque container consomme.
 
-```bash
-git clone https://github.com/fabricehh/devops-stack.git
-cd devops-stack/observability
-```
+Ouvrir **Infrastructure → Docker**
 
-### 1.2 Configurer les variables d'environnement
+Ce que vous voyez :
 
-```bash
-cp .env.example .env
-nano .env
-```
+| Panneau | Lecture |
+|---|---|
+| **Containers actifs** | Nombre vert. Doit rester stable |
+| **Containers arrêtés** | Doit être à 0. Si > 0 → un service est tombé |
+| **CPU par container** | Qui consomme le plus ? `task-api`, `grafana`, etc. |
+| **RAM par container** | Détecter les fuites mémoire (courbe qui monte sans fin) |
 
-Remplir les valeurs :
-
-```env
-GF_ADMIN_USER=admin
-GF_ADMIN_PASSWORD=MotDePasseSecurise
-
-SMTP_USER=alerts@votre-domaine.com
-SMTP_PASSWORD=votre-mot-de-passe
-
-ALERT_EMAIL=ops-team@votre-domaine.com
-TEAMS_WEBHOOK_URL=https://outlook.office.com/webhook/VOTRE-ID
-```
-
-### 1.3 Configurer AlertManager
-
-Éditer `alertmanager/alertmanager.yml` et remplacer les 3 placeholders :
-
-```yaml
-smtp_from: alerts@votre-domaine.com
-smtp_auth_username: alerts@votre-domaine.com
-smtp_auth_password: votre-mot-de-passe
-
-url: https://outlook.office.com/webhook/VOTRE-WEBHOOK-TEAMS
-to: ops-team@votre-domaine.com
-```
-
-### 1.4 Créer le réseau Traefik (si pas déjà fait)
-
-```bash
-docker network create traefik-net
-```
-
-### 1.5 Démarrer la stack
-
-```bash
-docker compose up -d
-```
-
-### 1.6 Vérifier que tous les services sont UP
-
-```bash
-docker compose ps
-```
-
-Résultat attendu :
-
-```
-NAME              STATUS
-prometheus        Up
-alertmanager      Up
-grafana           Up
-loki              Up
-tempo             Up
-otelcollector     Up
-node-exporter     Up
-cadvisor          Up
-```
+**Astuce :** Cliquer sur un nom dans la légende pour isoler un container.
 
 ---
 
-## 2. Accès aux interfaces
+### Dashboard Applications — Santé de la Task API
 
-| Service | URL | Identifiants |
-|---|---|---|
-| Grafana | https://grafana.devitlab.ddns.net | admin / *voir .env* |
-| Prometheus | https://prometheus.devitlab.ddns.net | — |
-| AlertManager | https://alertmanager.devitlab.ddns.net | — |
+**À quoi ça sert :** Savoir si l'application répond bien aux utilisateurs.
 
----
+Ouvrir **Infrastructure → Applications**
 
-## 3. Dashboards Grafana
+Ce que vous voyez :
 
-Les 5 dashboards sont provisionnés automatiquement dans le dossier **Infrastructure**.
+| Panneau | Lecture |
+|---|---|
+| **Requêtes / seconde** | Le trafic actuel. Normal si correspond à ce que vous attendez |
+| **Temps de réponse P50 / P95** | P50 = temps médian. P95 = les 5% les plus lents. Alerte si P95 > 2s |
+| **Taux d'erreurs 5xx** | Doit être à 0%. Toute valeur > 0 = bug à investiguer |
+| **Disponibilité 24h** | Doit être à 100%. En dessous de 99% = problème sérieux |
 
-### Dashboard Infrastructure
-
-**Chemin :** Dashboards → Infrastructure → Infrastructure
-
-Affiche CPU, RAM, Disque et Réseau pour chaque serveur supervisé.
-
-Seuils configurés :
-- CPU / RAM > 80% → orange
-- CPU / RAM > 95% → rouge
-- Disque > 80% → orange, > 95% → rouge
+**Lecture rapide :** Tout vert = tout va bien. Orange/rouge = regarder les logs.
 
 ---
 
-### Dashboard Docker
+### Dashboard Logs — Chercher dans les logs
 
-**Chemin :** Dashboards → Infrastructure → Docker
+**À quoi ça sert :** Trouver ce qui s'est passé quand une erreur survient.
 
-Affiche le nombre de containers actifs/arrêtés, CPU et RAM par container.
+Ouvrir **Infrastructure → Logs**
 
----
+#### Filtrer par niveau
 
-### Dashboard Applications
+En haut à gauche, variable **Niveau** : sélectionner `ERROR`, `WARNING` ou `INFO`.
 
-**Chemin :** Dashboards → Infrastructure → Applications
+Pour voir uniquement les erreurs : décocher tout sauf `ERROR`.
 
-Affiche pour chaque application :
-- Requêtes / seconde
-- Temps de réponse P50 / P95
-- Taux d'erreurs 5xx
-- Disponibilité sur 24h
+#### Faire une recherche
 
-> Les métriques apparaissent automatiquement dès qu'une application envoie des données via OpenTelemetry.
+En haut, champ **Recherche** : taper un mot clé.
 
----
+Exemples :
+- `timeout` → trouver tous les timeouts
+- `task_created` → voir toutes les créations de tâches
+- `500` → voir les erreurs HTTP 500
 
-### Dashboard Logs
+#### Lire un log
 
-**Chemin :** Dashboards → Infrastructure → Logs
+Cliquer sur **>** à gauche d'une ligne pour voir tous les détails :
 
-Affiche les logs en temps réel avec :
-- Filtre par niveau (ERROR / WARNING / INFO)
-- Moteur de recherche textuelle (variable **Recherche** en haut)
-- Volume de logs par niveau en graphique
+```
+timestamp   : 2026-06-13T10:00:00Z
+level       : ERROR
+name        : app.routes.tasks
+message     : task_created
+task_id     : 42
+trace_id    : abc123def456      ← cliquer pour voir la trace !
+```
 
----
+#### Aller de log à trace
 
-### Dashboard Traces
-
-**Chemin :** Dashboards → Infrastructure → Traces
-
-Affiche :
-- Appels par service (spans/s)
-- Latence P95 par service
-- Taux d'erreurs (spans en erreur)
-- Service Map (graphe des dépendances entre services)
+Sur le champ `trace_id` → cliquer sur **Voir dans Tempo**.  
+La trace complète de la requête s'ouvre.
 
 ---
 
-## 4. Ajouter un serveur applicatif à superviser
+### Dashboard Traces — Suivre une requête de bout en bout
 
-Chaque serveur applicatif (srv-app-01, srv-app-02, …) doit avoir **Node Exporter** et **cAdvisor** installés.
+**À quoi ça sert :** Comprendre exactement où une requête a perdu du temps.
 
-### 4.1 Installer Node Exporter sur le serveur applicatif
+Ouvrir **Infrastructure → Traces**
+
+#### Lire les métriques de traces
+
+| Panneau | Lecture |
+|---|---|
+| **Appels par service** | Trafic reçu par chaque microservice |
+| **Latence P95** | Où les 5% les plus lentes perdent du temps |
+| **Taux d'erreurs** | Spans qui se terminent en erreur |
+| **Service Map** | Graphe des dépendances entre services |
+
+#### Explorer une trace individuelle
+
+1. Menu gauche → **Explore**
+2. Sélectionner la datasource **Tempo**
+3. Dans le champ **TraceQL** : taper `{}` et appuyer sur `Maj+Entrée`
+4. Cliquer sur un `TraceID` dans les résultats
+
+Vous voyez la cascade de la requête :
+
+```
+POST /api/v1/tasks         [42ms]  ← durée totale
+  └── INSERT INTO tasks    [3ms]   ← appel base de données
+```
+
+**Identifier une lenteur :** la barre la plus longue = le goulet d'étranglement.
+
+---
+
+## Prometheus — Explorer les métriques brutes
+
+**Accès :** https://prometheus.devitlab.ddns.net
+
+Prometheus permet d'écrire des requêtes pour interroger n'importe quelle métrique.
+
+### Vérifier que tout est surveillé
+
+1. Menu en haut → **Status → Targets**
+2. Tout doit être en **vert (UP)**
+
+Si un service est en rouge : il est inaccessible ou arrêté.
+
+### Requêtes utiles à tester
+
+Aller dans **Graph** (menu du haut) et coller ces requêtes :
+
+**CPU du serveur en % :**
+```
+100 - (avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)
+```
+
+**RAM utilisée en % :**
+```
+(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100
+```
+
+**Nombre de requêtes par seconde sur la Task API :**
+```
+rate(flask_http_request_total[1m])
+```
+
+**Containers Docker actuellement actifs :**
+```
+count(container_last_seen{image!=""})
+```
+
+Cliquer sur l'onglet **Graph** pour voir l'évolution dans le temps.
+
+---
+
+## AlertManager — Gérer les alertes
+
+**Accès :** https://alertmanager.devitlab.ddns.net
+
+### Ce que vous voyez
+
+- **Onglet Alerts :** toutes les alertes actuellement actives
+- **Onglet Silences :** alertes mises en sourdine
+
+### Silence une alerte pendant une maintenance
+
+Si vous savez qu'un serveur va être en maintenance et que vous ne voulez pas recevoir d'alertes :
+
+1. Onglet **Silences** → bouton **New Silence**
+2. **Matcher :** `instance = srv-app-01`
+3. **Duration :** durée de la maintenance (ex: 2h)
+4. **Comment :** `Maintenance planifiée`
+5. Cliquer **Create**
+
+Les alertes de ce serveur ne partiront pas sur Teams/Email pendant cette période.
+
+### Tester qu'une notification Teams fonctionne
 
 ```bash
-# Sur srv-app-01
-docker run -d \
-  --name node-exporter \
-  --restart unless-stopped \
-  --pid host \
-  -v /proc:/host/proc:ro \
-  -v /sys:/host/sys:ro \
-  -v /:/host:ro,rslave \
-  prom/node-exporter:v1.8.1 \
-  --path.rootfs=/host
-```
-
-### 4.2 Installer cAdvisor sur le serveur applicatif
-
-```bash
-docker run -d \
-  --name cadvisor \
-  --restart unless-stopped \
-  --privileged \
-  -v /:/rootfs:ro \
-  -v /var/run:/var/run:ro \
-  -v /sys:/sys:ro \
-  -v /var/lib/docker:/var/lib/docker:ro \
-  gcr.io/cadvisor/cadvisor:v0.49.1
-```
-
-### 4.3 Déclarer le serveur dans Prometheus
-
-Sur **srv-observability**, créer un fichier dans `prometheus/targets/` :
-
-```bash
-# Fichier : prometheus/targets/node-exporter-srv-app-01.yml
-cat > prometheus/targets/node-exporter-srv-app-01.yml << EOF
-- targets: [192.168.1.101:9100]
-  labels:
-    instance: srv-app-01
-    env: production
-EOF
-
-# Fichier : prometheus/targets/cadvisor-srv-app-01.yml
-cat > prometheus/targets/cadvisor-srv-app-01.yml << EOF
-- targets: [192.168.1.101:8080]
-  labels:
-    instance: srv-app-01
-    env: production
-EOF
-```
-
-Prometheus recharge les targets automatiquement toutes les 60 secondes — pas besoin de redémarrer.
-
----
-
-## 5. Intégrer une nouvelle application
-
-Toute application qui envoie des données OpenTelemetry apparaît automatiquement dans Grafana.
-
-### 5.1 Variable d'environnement à configurer
-
-```bash
-OTEL_EXPORTER_OTLP_ENDPOINT=http://srv-observability:4317
-OTEL_SERVICE_NAME=nom-de-mon-application
-OTEL_RESOURCE_ATTRIBUTES=deployment.environment=production,service.version=1.0.0
-```
-
-> Remplacer `srv-observability` par l'IP ou le hostname du serveur observabilité.
-
-### 5.2 Format de log recommandé
-
-Les applications doivent émettre des logs JSON :
-
-```json
-{
-  "timestamp": "2026-06-13T12:00:00Z",
-  "level": "ERROR",
-  "service": "payment-api",
-  "message": "Database timeout",
-  "trace_id": "abc123def456"
-}
-```
-
-### 5.3 Exemples par langage
-
-**Python**
-```python
-from opentelemetry import trace
-from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
-
-provider = TracerProvider()
-provider.add_span_processor(
-    BatchSpanProcessor(OTLPSpanExporter())  # lit OTEL_EXPORTER_OTLP_ENDPOINT
-)
-trace.set_tracer_provider(provider)
-```
-
-**Node.js**
-```javascript
-const { NodeSDK } = require('@opentelemetry/sdk-node');
-const { OTLPTraceExporter } = require('@opentelemetry/exporter-trace-otlp-grpc');
-
-const sdk = new NodeSDK({
-  traceExporter: new OTLPTraceExporter(),  // lit OTEL_EXPORTER_OTLP_ENDPOINT
-});
-sdk.start();
-```
-
-**Java (Spring Boot)**
-```yaml
-# application.yml
-management:
-  otlp:
-    metrics:
-      export:
-        url: ${OTEL_EXPORTER_OTLP_ENDPOINT}/v1/metrics
-  tracing:
-    sampling:
-      probability: 1.0
-```
-
-**.NET**
-```csharp
-builder.Services.AddOpenTelemetry()
-    .WithTracing(b => b
-        .AddAspNetCoreInstrumentation()
-        .AddOtlpExporter());  // lit OTEL_EXPORTER_OTLP_ENDPOINT
-```
-
----
-
-## 6. Alerting
-
-### 6.1 Alertes configurées
-
-| Alerte | Seuil | Sévérité | Notification |
-|---|---|---|---|
-| ApplicationDown | service inaccessible > 1 min | critical | Teams + Email |
-| ContainerDown | container arrêté > 1 min | critical | Teams + Email |
-| NodeDown | serveur inaccessible > 1 min | critical | Teams + Email |
-| DiskCritical | disque > 95% | critical | Teams + Email |
-| HighCPU | CPU > 80% pendant 5 min | warning | Teams |
-| HighMemory | RAM > 80% pendant 5 min | warning | Teams |
-| HighResponseTime | P95 > 2s pendant 5 min | warning | Teams |
-| DiskWarning | disque > 80% | warning | Teams |
-| HighErrorRate | 5xx > 5% pendant 5 min | warning | Teams |
-| ContainerRestarted | redémarrage détecté | info | Teams |
-
-### 6.2 Créer une alerte Grafana
-
-1. Ouvrir n'importe quel dashboard
-2. Éditer un panel → onglet **Alert**
-3. Définir la condition et le seuil
-4. Choisir le contact point : **Teams** ou **Email**
-
-### 6.3 Tester les notifications
-
-```bash
-# Tester AlertManager directement
 curl -X POST http://localhost:9093/api/v1/alerts \
   -H "Content-Type: application/json" \
   -d '[{
-    "labels": {"alertname": "TestAlert", "severity": "warning"},
-    "annotations": {"summary": "Test de notification"}
+    "labels": {"alertname": "TestManuel", "severity": "warning"},
+    "annotations": {"summary": "Test depuis AlertManager"}
   }]'
 ```
 
----
-
-## 7. Commandes utiles
-
-### État de la stack
-
-```bash
-# Voir tous les services
-docker compose ps
-
-# Logs d'un service
-docker compose logs -f grafana
-docker compose logs -f otelcollector
-docker compose logs -f prometheus
-
-# Santé OTel Collector
-curl http://localhost:13133/
-```
-
-### Recharger une configuration
-
-```bash
-# Recharger Prometheus (sans redémarrage)
-curl -X POST http://localhost:9090/-/reload
-
-# Recharger AlertManager
-curl -X POST http://localhost:9093/-/reload
-
-# Redémarrer un service
-docker compose restart grafana
-```
-
-### Vérifier les métriques reçues
-
-```bash
-# Métriques exposées par OTel Collector
-curl http://localhost:8889/metrics | grep otel_
-
-# Targets Prometheus (UP/DOWN)
-curl http://localhost:9090/api/v1/targets | jq '.data.activeTargets[] | {job:.labels.job, instance:.labels.instance, health:.health}'
-```
-
-### Mise à jour de la stack
-
-```bash
-docker compose pull
-docker compose up -d
-```
+Un message doit apparaître dans le canal Teams dans les 30 secondes.
 
 ---
 
-## 8. Architecture des flux de données
+## Scénarios du quotidien
 
-```
-Applications (Python, Java, NodeJS, Go, .NET)
-        │
-        │  OTLP gRPC :4317 / HTTP :4318
-        ▼
-┌─────────────────────────┐
-│  OpenTelemetry Collector │
-│  Reçoit : Metrics        │
-│           Logs           │
-│           Traces         │
-└──────┬──────────┬────────┘
-       │          │
-  Metrics       Logs          Traces
-       │          │               │
-       ▼          ▼               ▼
- Prometheus      Loki           Tempo
- (scrape :8889)  (:3100)       (:4317)
-       │          │               │
-       └──────────┴───────────────┘
-                  │
-                  ▼
-              Grafana
-         Dashboards + Alerting
-                  │
-          ┌───────┴────────┐
-          ▼                ▼
-        Teams            Email
-   (webhook)      (smtp.office365.com)
+### "Une application est lente — où regarder ?"
 
-Serveurs
-  Node Exporter ──→ Prometheus (métriques OS)
-  cAdvisor      ──→ Prometheus (métriques Docker)
-```
+1. **Dashboard Applications** → colonne **Temps de réponse P95** : montée anormale ?
+2. **Dashboard Traces** → panneau **Latence P95** : quel service est lent ?
+3. **Explore → Tempo** : trouver une trace lente et identifier la barre la plus longue
+4. **Dashboard Logs** : chercher `ERROR` dans les logs de la période concernée
 
 ---
 
-## 9. Dépannage
+### "Un utilisateur signale une erreur — retrouver ce qui s'est passé"
 
-### Grafana ne charge pas les datasources
-
-```bash
-docker compose logs grafana | grep -i error
-# Vérifier que prometheus/loki/tempo sont UP
-docker compose ps
-```
-
-### OTel Collector refuse les connexions
-
-```bash
-# Vérifier les ports exposés
-docker compose port otelcollector 4317
-docker compose port otelcollector 4318
-
-# Vérifier la config
-docker compose logs otelcollector
-```
-
-### Loki ne reçoit pas les logs
-
-```bash
-# Tester l'endpoint Loki directement
-curl -X POST http://localhost:3100/loki/api/v1/push \
-  -H "Content-Type: application/json" \
-  -d '{"streams":[{"stream":{"job":"test"},"values":[["'"$(date +%s%N)"'","test message"]]}]}'
-```
-
-### Prometheus ne scrape pas un target
-
-```bash
-# Vérifier l'état des targets
-curl -s http://localhost:9090/api/v1/targets | jq '.data.activeTargets[] | select(.health != "up")'
-```
-
-### Alertes ne partent pas sur Teams
-
-1. Vérifier le webhook dans `alertmanager/alertmanager.yml`
-2. Vérifier les logs AlertManager : `docker compose logs alertmanager`
-3. Tester manuellement avec le curl de la section 6.3
+1. **Dashboard Logs** → champ **Recherche** : taper `ERROR`
+2. Régler l'intervalle de temps en haut à droite sur la période signalée
+3. Développer le log d'erreur → copier le `trace_id`
+4. **Explore → Tempo** → coller le `trace_id` dans **TraceID**
+5. La trace montre exactement quelle ligne de code a échoué et pourquoi
 
 ---
 
-## 10. Sauvegardes
+### "Le serveur semble lent ce matin — diagnostic rapide"
 
-Les données sont dans des volumes Docker. Pour sauvegarder :
+1. **Dashboard Infrastructure** → CPU et RAM : pic anormal ?
+2. **Dashboard Docker** → quel container consomme trop ?
+3. **Prometheus → Status → Targets** : tous les services sont-ils UP ?
+4. Si un service est DOWN → `docker compose logs <service>` sur le serveur
 
-```bash
-# Lister les volumes
-docker volume ls | grep observability
+---
 
-# Sauvegarder Grafana (dashboards personnalisés, users)
-docker run --rm \
-  -v observability_grafana_data:/data \
-  -v $(pwd)/backups:/backup \
-  alpine tar czf /backup/grafana-$(date +%Y%m%d).tar.gz /data
+### "Je veux voir l'impact d'un déploiement"
 
-# Sauvegarder Prometheus
-docker run --rm \
-  -v observability_prometheus_data:/data \
-  -v $(pwd)/backups:/backup \
-  alpine tar czf /backup/prometheus-$(date +%Y%m%d).tar.gz /data
-```
+1. Noter l'heure du déploiement
+2. **Dashboard Applications** : régler l'intervalle sur "avant / après déploiement"
+3. Comparer **Temps de réponse** et **Taux d'erreurs** avant et après
+4. Si dégradation → rollback et consulter les **Logs** pour trouver la cause
+
+---
+
+## Réglage de la période de temps
+
+En haut à droite de chaque dashboard, le sélecteur de période :
+
+| Valeur | Usage |
+|---|---|
+| **Last 15 minutes** | Incident en cours |
+| **Last 1 hour** | Analyse récente |
+| **Last 3 hours** | Défaut par défaut |
+| **Last 24 hours** | Bilan journalier |
+| **Last 7 days** | Tendances hebdomadaires |
+
+Cliquer sur **🔄 (refresh)** à droite pour choisir le rafraîchissement automatique :  
+`5s` pour suivre un incident en direct, `1m` pour la surveillance normale.
