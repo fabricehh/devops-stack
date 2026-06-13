@@ -45,6 +45,14 @@ scrape_configs:
     static_configs:
       - targets: [otelcollector:8889]
 
+  # Demo app (PoC — même serveur)
+  - job_name: task-api
+    static_configs:
+      - targets: [task-api:5000]
+        labels:
+          service: task-api
+          env: production
+
   # Serveurs applicatifs — découverte via fichiers (file_sd)
   # Ajouter un fichier par serveur dans prometheus/targets/
   - job_name: node-exporter-app-servers
