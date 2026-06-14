@@ -1,7 +1,7 @@
-# Task API — Demo Observabilité
+# Task API — Demo App
 
 API RESTful de gestion de tâches construite avec Flask.  
-Démontre l'intégration complète avec la stack observabilité : **Prometheus · Loki · Tempo** via **OpenTelemetry**.
+Supervisée par **Uptime Kuma** (monitoring) et **Dozzle** (logs).
 
 ---
 
@@ -10,12 +10,11 @@ Démontre l'intégration complète avec la stack observabilité : **Prometheus �
 | Composant | Technologie |
 |---|---|
 | Framework | Flask 3.0 |
-| Base de données | SQLite (dev) / PostgreSQL (prod) |
+| Base de données | SQLite |
 | Validation | Marshmallow + marshmallow-sqlalchemy |
-| Documentation | Flasgger (Swagger UI) |
-| Métriques | prometheus-flask-exporter |
-| Logs | python-json-logger |
-| Traces / Métriques / Logs | OpenTelemetry SDK → OTel Collector |
+| Documentation | Swagger UI (`/apidocs`) |
+| Métriques | prometheus-flask-exporter (`/metrics`) |
+| Logs | python-json-logger (JSON structuré) |
 | Serveur WSGI | Gunicorn |
 
 ---
@@ -24,54 +23,38 @@ Démontre l'intégration complète avec la stack observabilité : **Prometheus �
 
 - Python 3.12+
 - Docker + Docker Compose Plugin
-- Stack observabilité démarrée (`observability/docker-compose.yml`)
 
 ---
 
-## Installation locale (sans Docker)
+## Lancer en local
 
 ```bash
-# 1. Créer un environnement virtuel
-python -m venv .venv
-source .venv/bin/activate        # Linux / Mac
-.venv\Scripts\activate           # Windows
-
-# 2. Installer les dépendances
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-
-# 3. Configurer l'environnement
 cp .env.example .env
-
-# 4. Lancer l'application
-python wsgi.py
+python3 wsgi.py
 ```
 
-L'API est disponible sur **http://localhost:5000**
-
-> Sans `OTEL_EXPORTER_OTLP_ENDPOINT` configuré, l'app fonctionne normalement mais sans traces ni métriques OTel.
+API disponible sur **http://localhost:5000**
 
 ---
 
-## Installation Docker
+## Lancer avec Docker (stack complète)
 
 ```bash
-# Démarrer la stack observabilité d'abord
-cd ../observability && docker compose up -d && cd ../demo-app
-
-# Construire et démarrer la demo app
+# Depuis la racine du projet
 docker compose up -d
 
-# Vérifier
+# Vérifier les logs
 docker compose logs -f task-api
 ```
-
-L'app rejoint automatiquement le réseau `observability_monitoring` et envoie ses données à l'OTel Collector.
 
 ---
 
 ## Endpoints
 
-### Santé
+### Santé — surveillé par Uptime Kuma
 
 ```
 GET /health
@@ -84,7 +67,7 @@ GET /health
   "version": "1.0.0",
   "environment": "production",
   "uptime_seconds": 142.3,
-  "timestamp": "2026-06-13T10:00:00+00:00",
+  "timestamp": "2026-06-14T10:00:00+00:00",
   "dependencies": { "database": "ok" }
 }
 ```
@@ -107,24 +90,22 @@ Swagger UI avec tous les endpoints, schémas et exemples.
 GET /metrics
 ```
 
-Expose les métriques HTTP (requêtes, latences, codes de réponse) directement scrappables par Prometheus.
-
 ---
 
 ### Tâches
 
-#### Lister les tâches
+#### Lister
 
 ```
-GET /api/v1/tasks
+GET /api/v1/tasks?status=pending&priority=high&page=1&per_page=20
 ```
 
-| Paramètre | Type | Valeurs possibles | Défaut |
-|---|---|---|---|
-| `status` | string | `pending` `in_progress` `done` `cancelled` | — |
-| `priority` | string | `low` `medium` `high` `critical` | — |
-| `page` | integer | — | `1` |
-| `per_page` | integer | max `100` | `20` |
+| Paramètre | Valeurs possibles | Défaut |
+|---|---|---|
+| `status` | `pending` `in_progress` `done` `cancelled` | — |
+| `priority` | `low` `medium` `high` `critical` | — |
+| `page` | — | `1` |
+| `per_page` | max `100` | `20` |
 
 **Réponse**
 
@@ -133,26 +114,20 @@ GET /api/v1/tasks
   "data": [
     {
       "id": 1,
-      "title": "Configurer Prometheus",
-      "description": "Ajouter les scrape configs pour les app servers",
+      "title": "Déployer la stack",
       "status": "in_progress",
       "priority": "high",
-      "created_at": "2026-06-13T09:00:00+00:00",
-      "updated_at": "2026-06-13T09:30:00+00:00"
+      "created_at": "2026-06-14T09:00:00+00:00",
+      "updated_at": "2026-06-14T09:30:00+00:00"
     }
   ],
-  "meta": {
-    "total": 1,
-    "page": 1,
-    "per_page": 20,
-    "pages": 1
-  }
+  "meta": { "total": 1, "page": 1, "per_page": 20, "pages": 1 }
 }
 ```
 
 ---
 
-#### Créer une tâche
+#### Créer
 
 ```
 POST /api/v1/tasks
@@ -160,33 +135,16 @@ Content-Type: application/json
 ```
 
 ```json
-{
-  "title": "Configurer Prometheus",
-  "description": "Ajouter les scrape configs",
-  "status": "pending",
-  "priority": "high"
-}
+{ "title": "Déployer la stack", "priority": "high" }
 ```
 
-Seul `title` est obligatoire. `status` vaut `pending` et `priority` vaut `medium` par défaut.
+Seul `title` est obligatoire. `status` = `pending`, `priority` = `medium` par défaut.
 
 **Réponse** `201 Created`
 
-```json
-{
-  "id": 1,
-  "title": "Configurer Prometheus",
-  "description": "Ajouter les scrape configs",
-  "status": "pending",
-  "priority": "high",
-  "created_at": "2026-06-13T09:00:00+00:00",
-  "updated_at": "2026-06-13T09:00:00+00:00"
-}
-```
-
 ---
 
-#### Récupérer une tâche
+#### Récupérer
 
 ```
 GET /api/v1/tasks/{id}
@@ -194,18 +152,17 @@ GET /api/v1/tasks/{id}
 
 ---
 
-#### Remplacer une tâche (PUT)
+#### Remplacer (PUT)
 
 ```
 PUT /api/v1/tasks/{id}
-Content-Type: application/json
 ```
 
-Remplace tous les champs. `title` est obligatoire.
+Remplace tous les champs. `title` obligatoire.
 
 ---
 
-#### Mise à jour partielle (PATCH)
+#### Modifier partiellement (PATCH)
 
 ```
 PATCH /api/v1/tasks/{id}
@@ -216,11 +173,9 @@ Content-Type: application/json
 { "status": "done" }
 ```
 
-Seuls les champs fournis sont modifiés.
-
 ---
 
-#### Supprimer une tâche
+#### Supprimer
 
 ```
 DELETE /api/v1/tasks/{id}
@@ -239,18 +194,8 @@ GET /api/v1/stats
 ```json
 {
   "total": 42,
-  "by_status": {
-    "pending": 15,
-    "in_progress": 8,
-    "done": 17,
-    "cancelled": 2
-  },
-  "by_priority": {
-    "low": 5,
-    "medium": 20,
-    "high": 14,
-    "critical": 3
-  }
+  "by_status": { "pending": 15, "in_progress": 8, "done": 17, "cancelled": 2 },
+  "by_priority": { "low": 5, "medium": 20, "high": 14, "critical": 3 }
 }
 ```
 
@@ -262,24 +207,11 @@ GET /api/v1/stats
 |---|---|
 | `200` | Succès |
 | `201` | Ressource créée |
-| `204` | Suppression réussie (pas de corps) |
+| `204` | Suppression réussie |
 | `400` | Corps JSON manquant |
 | `404` | Ressource introuvable |
-| `405` | Méthode non autorisée |
-| `422` | Données invalides (détail des erreurs inclus) |
+| `422` | Données invalides |
 | `500` | Erreur interne |
-
-**Exemple d'erreur 422**
-
-```json
-{
-  "error": "Données invalides",
-  "details": {
-    "title": ["Missing data for required field."],
-    "status": ["Statut invalide."]
-  }
-}
-```
 
 ---
 
@@ -289,12 +221,12 @@ GET /api/v1/stats
 # Créer une tâche
 curl -s -X POST http://localhost:5000/api/v1/tasks \
   -H "Content-Type: application/json" \
-  -d '{"title":"Ma première tâche","priority":"high"}' | jq
+  -d '{"title":"Ma tâche","priority":"high"}' | jq
 
-# Lister les tâches urgentes en cours
-curl -s "http://localhost:5000/api/v1/tasks?priority=critical&status=in_progress" | jq
+# Lister les tâches critiques
+curl -s "http://localhost:5000/api/v1/tasks?priority=critical" | jq
 
-# Passer une tâche à "done"
+# Passer à "done"
 curl -s -X PATCH http://localhost:5000/api/v1/tasks/1 \
   -H "Content-Type: application/json" \
   -d '{"status":"done"}' | jq
@@ -311,68 +243,38 @@ curl -s http://localhost:5000/health | jq
 ## Tests
 
 ```bash
-# Lancer tous les tests
 pytest tests/ -v
-
-# Avec couverture
-pytest tests/ -v --tb=short
-
-# Un test spécifique
-pytest tests/test_tasks.py::TestCreateTask::test_create_full -v
 ```
 
-Les tests utilisent une base SQLite en mémoire et désactivent OTel — aucune dépendance externe requise.
+Les tests utilisent une base SQLite en mémoire, aucune dépendance externe requise.
 
 ---
 
 ## Générer de la charge
 
-Le script `load_test.py` simule du trafic réaliste pour alimenter les dashboards Grafana.
-
 ```bash
-# 60 secondes à 5 req/s (défaut)
-python load_test.py
+# Depuis la racine du projet
+python3 demo-app/load_test.py --duration 120 --rps 2
 
-# 5 minutes à 10 req/s
-python load_test.py --duration 300 --rps 10
+# Depuis le dossier demo-app
+python3 load_test.py --duration 120 --rps 2
 
-# Cibler un serveur distant
-API_URL=http://srv-app-01:5000 python load_test.py --duration 120
+# Serveur distant
+API_URL=http://mon-serveur:5000 python3 load_test.py
 ```
+
+Les logs apparaissent en temps réel dans **Dozzle**.  
+Le temps de réponse est visible dans **Uptime Kuma**.
 
 ---
 
-## Observabilité
+## Logs
 
-### Ce que l'app envoie automatiquement
-
-```
-Task API
-   │
-   │  OTLP gRPC (port 4317)
-   ▼
-OTel Collector
-   ├── Traces  → Tempo    (chaque requête HTTP + requête SQL)
-   ├── Logs    → Loki     (JSON structuré avec trace_id)
-   └── Métriques → Prometheus (via endpoint /metrics + OTel)
-```
-
-### Variables d'environnement OTel
-
-| Variable | Description | Exemple |
-|---|---|---|
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | Adresse de l'OTel Collector | `http://otelcollector:4317` |
-| `OTEL_SERVICE_NAME` | Nom du service dans Grafana | `task-api` |
-| `SERVICE_VERSION` | Version affichée dans les traces | `1.0.0` |
-| `DEPLOYMENT_ENVIRONMENT` | Label d'environnement | `production` |
-
-### Format des logs
-
-Chaque log est émis en JSON structuré :
+Chaque action émet un log JSON structuré visible dans Dozzle :
 
 ```json
 {
-  "timestamp": "2026-06-13T10:00:00.123Z",
+  "timestamp": "2026-06-14T10:00:00Z",
   "level": "INFO",
   "name": "app.routes.tasks",
   "message": "task_created",
@@ -381,55 +283,30 @@ Chaque log est émis en JSON structuré :
 }
 ```
 
-Le champ `trace_id` est automatiquement injecté par OTel dans chaque log, permettant la corrélation **log ↔ trace** dans Grafana.
-
-### Dashboards Grafana
-
-Après démarrage, l'app apparaît dans :
-
-| Dashboard | Métriques visibles |
-|---|---|
-| **Applications** | Requêtes/s, latence P50/P95, taux d'erreurs, disponibilité |
-| **Logs** | Tous les logs filtrables par niveau et par texte |
-| **Traces** | Traces des requêtes HTTP et des requêtes SQL |
-| **Docker** | CPU et RAM du container `task-api` |
-
 ---
 
-## Structure du projet
+## Structure
 
 ```
 demo-app/
 ├── app/
 │   ├── __init__.py        ← factory create_app()
-│   ├── config.py          ← configuration depuis les variables d'env
-│   ├── database.py        ← instance SQLAlchemy
+│   ├── config.py          ← variables d'environnement
+│   ├── database.py        ← SQLAlchemy
 │   ├── models.py          ← modèle Task
-│   ├── schemas.py         ← schémas de validation Marshmallow
-│   ├── telemetry.py       ← OTel traces + métriques + logs, Prometheus
+│   ├── schemas.py         ← validation Marshmallow
+│   ├── telemetry.py       ← logs JSON + métriques Prometheus
 │   └── routes/
 │       ├── health.py      ← GET /health
-│       └── tasks.py       ← CRUD /api/v1/tasks + /api/v1/stats
+│       ├── tasks.py       ← CRUD + stats
+│       └── docs.py        ← GET /apidocs + /swagger.json
 ├── tests/
-│   ├── conftest.py        ← fixtures pytest
-│   └── test_tasks.py      ← 28 tests (tous les endpoints et cas limites)
-├── wsgi.py                ← entry point Gunicorn
+│   ├── conftest.py
+│   └── test_tasks.py      ← 28 tests
+├── wsgi.py
 ├── Dockerfile
 ├── docker-compose.yml
-├── load_test.py           ← générateur de charge
+├── load_test.py
 ├── requirements.txt
 └── .env.example
 ```
-
----
-
-## Intégrer une autre application
-
-Ce projet sert de référence. Pour intégrer votre propre application :
-
-1. Installer le SDK OpenTelemetry de votre langage
-2. Configurer `OTEL_EXPORTER_OTLP_ENDPOINT` vers l'OTel Collector
-3. Émettre des logs en JSON avec les champs `level`, `service`, `message`
-4. L'application apparaît automatiquement dans tous les dashboards Grafana
-
-Voir [observability/user-guide.md](../observability/user-guide.md) pour les exemples par langage (Java, Node.js, .NET, Go).
